@@ -21,7 +21,16 @@ if MODE == "in_progress":
     filter_body = {"filter": {"property": "Status", "status": {"equals": "In progress"}}}
     title = "Still In Progress"
 elif MODE == "not_done":
-    filter_body = {"filter": {"property": "Status", "status": {"does_not_equal": "Done"}}}
+    # Excludes Category = Event, so calendar-synced events don't show up
+    # alongside actual incomplete tasks in this reminder.
+    filter_body = {
+        "filter": {
+            "and": [
+                {"property": "Status", "status": {"does_not_equal": "Done"}},
+                {"property": "Category", "select": {"does_not_equal": "Event"}},
+            ]
+        }
+    }
     title = "Incomplete Tasks Reminder"
 else:
     raise ValueError(f"Unknown mode: {MODE}")

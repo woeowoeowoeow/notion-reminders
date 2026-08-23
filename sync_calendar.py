@@ -98,6 +98,7 @@ for event in events:
     properties = {
         "Task name": {"title": [{"text": {"content": title}}]},
         "Category": {"select": {"name": "Event"}},
+        "Status": {"status": {"name": "Event"}},
         "Due date": {
             "date": {
                 "start": start,
