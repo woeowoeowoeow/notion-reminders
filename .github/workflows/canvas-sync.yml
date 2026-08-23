@@ -1,0 +1,22 @@
+name: Sync Canvas Assignments to Notion
+
+on:
+  schedule:
+    - cron: '15 6 * * *'   # once daily, 6:15 AM UTC
+  workflow_dispatch:        # lets you trigger it manually to test
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python canvas_sync.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          CANVAS_GT_ICS_URL: ${{ secrets.CANVAS_GT_ICS_URL }}
+          CANVAS_FULTON_ICS_URL: ${{ secrets.CANVAS_FULTON_ICS_URL }}
