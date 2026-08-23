@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 import requests
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
@@ -21,7 +22,18 @@ if MODE == "in_progress":
     filter_body = {"filter": {"property": "Status", "status": {"equals": "In progress"}}}
     title = "Still In Progress"
 elif MODE == "not_done":
-    filter_body = {"filter": {"property": "Status", "status": {"does_not_equal": "Done"}}}
+    # Only tasks due within the next 7 days (computed fresh each run, so this
+    # is a real rolling window, not a fixed date). Tasks with no due date set
+    # are excluded, since they have nothing to compare against.
+    seven_days_out = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+    filter_body = {
+        "filter": {
+            "and": [
+                {"property": "Status", "status": {"does_not_equal": "Done"}},
+                {"property": "Due date", "date": {"on_or_before": seven_days_out}},
+            ]
+        }
+    }
     title = "Incomplete Tasks Reminder"
 else:
     raise ValueError(f"Unknown mode: {MODE}")
