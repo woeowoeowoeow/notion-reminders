@@ -1,0 +1,21 @@
+name: Sync D2L Brightspace Assignments to Notion
+
+on:
+  schedule:
+    - cron: '30 6 * * *'   # once daily, 6:30 AM UTC
+  workflow_dispatch:        # lets you trigger it manually to test
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python d2l_sync.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          D2L_KSU_ICS_URL: ${{ secrets.D2L_KSU_ICS_URL }}
