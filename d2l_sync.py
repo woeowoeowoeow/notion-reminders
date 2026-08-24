@@ -22,7 +22,10 @@ NOTION_HEADERS = {
 # --- ICS parsing (same minimal approach as canvas_sync.py) -----------------
 
 
-REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NotionSyncBot/1.0)"}
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+}
 
 
 def unfold_ics_lines(raw_text):
@@ -174,6 +177,9 @@ def main():
     response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
     response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
     print(f"Fetched feed: status {response.status_code}, {len(response.text)} chars, content-type {response.headers.get('content-type')}")
+    if not response.text.strip().startswith("BEGIN:VCALENDAR"):
+        print("Response doesn't look like ICS content. Full body below:")
+        print(response.text)
     response.raise_for_status()
     events = parse_ics_events(response.text)
     print(f"Parsed {len(events)} raw calendar event(s) from the feed.")
