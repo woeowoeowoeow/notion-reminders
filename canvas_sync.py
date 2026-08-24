@@ -4,8 +4,8 @@ import requests
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATA_SOURCE_ID = os.environ["NOTION_DATA_SOURCE_ID"]
-GT_ICS_URL = os.environ["CANVAS_GT_ICS_URL"]
-FULTON_ICS_URL = os.environ["CANVAS_FULTON_ICS_URL"]
+GT_ICS_URL = os.environ["CANVAS_GT_ICS_URL"].strip()
+FULTON_ICS_URL = os.environ["CANVAS_FULTON_ICS_URL"].strip()
 
 # The Fulton feed covers multiple courses (school-wide events, Speech & Debate,
 # FV AP Lit/Comp A). We only want assignments from FV AP Lit/Comp A, which is

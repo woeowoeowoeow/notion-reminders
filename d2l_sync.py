@@ -4,7 +4,7 @@ import requests
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATA_SOURCE_ID = os.environ["NOTION_DATA_SOURCE_ID"]
-D2L_ICS_URL = os.environ["D2L_KSU_ICS_URL"]
+D2L_ICS_URL = os.environ["D2L_KSU_ICS_URL"].strip()
 
 # Titles containing any of these (case-insensitive) are treated as assessments
 # rather than regular assignments/classwork. Same rule as the Canvas sync.
