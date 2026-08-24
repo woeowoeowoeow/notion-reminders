@@ -22,6 +22,9 @@ NOTION_HEADERS = {
 # --- ICS parsing (same minimal approach as canvas_sync.py) -----------------
 
 
+REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NotionSyncBot/1.0)"}
+
+
 def unfold_ics_lines(raw_text):
     lines = raw_text.replace("\r\n", "\n").split("\n")
     unfolded = []
@@ -135,13 +138,14 @@ def find_notion_page_by_d2l_id(d2l_id):
 
 
 def upsert_assignment(assignment):
-    title = f"{assignment['course']}: {assignment['title']}"
+    title = assignment["title"]
     is_assessment = any(kw in assignment["title"].lower() for kw in ASSESSMENT_KEYWORDS)
     due_date = parse_due_date(assignment["dtstart"])
 
     properties = {
         "Task name": {"title": [{"text": {"content": title}}]},
         "Category": {"select": {"name": "Assessment" if is_assessment else "Schoolwork"}},
+        "Class": {"select": {"name": assignment["course"]}},
         "Due date": {"date": {"start": due_date}},
         "D2L Event ID": {"rich_text": [{"text": {"content": assignment["uid"]}}]},
     }
@@ -167,9 +171,12 @@ def upsert_assignment(assignment):
 
 
 def main():
-    response = requests.get(D2L_ICS_URL)
+    response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
+    response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
+    print(f"Fetched feed: status {response.status_code}, {len(response.text)} chars, content-type {response.headers.get('content-type')}")
     response.raise_for_status()
     events = parse_ics_events(response.text)
+    print(f"Parsed {len(events)} raw calendar event(s) from the feed.")
     assignments = resolve_assignments(events)
 
     print(f"Found {len(assignments)} assignment(s) across all KSU courses.")

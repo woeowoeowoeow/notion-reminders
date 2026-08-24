@@ -86,7 +86,17 @@ def parse_due_date(dtstart, is_all_day):
 # --- Fetch and filter events ---------------------------------------------
 
 
-def fetch_assignments(url, course_filter=None):
+def extract_class_label(raw_summary):
+    match = re.search(r"\[([^\]]*)\]\s*$", raw_summary)
+    if not match:
+        return "Unknown"
+    parts = [p.strip() for p in match.group(1).split(",")]
+    if len(parts) >= 3:
+        return f"{parts[1]}: {parts[2]}"  # e.g. "MATH 1554: Linear Algebra"
+    return match.group(1).strip()
+
+
+def fetch_assignments(url, course_filter=None, class_label_override=None):
     response = requests.get(url)
     response.raise_for_status()
     events = parse_ics_events(response.text)
@@ -103,6 +113,7 @@ def fetch_assignments(url, course_filter=None):
         raw_summary = ics_unescape(event.get("SUMMARY", "(untitled)"))
         # Strip the trailing "[Course, Context, Tags]" bracket for a clean title
         title = re.sub(r"\s*\[[^\]]*\]\s*$", "", raw_summary).strip()
+        class_label = class_label_override or extract_class_label(raw_summary)
 
         is_assessment = any(kw in title.lower() for kw in ASSESSMENT_KEYWORDS)
 
@@ -126,6 +137,7 @@ def fetch_assignments(url, course_filter=None):
                 "due_date": due_date,
                 "is_datetime": is_datetime,
                 "category": "Assessment" if is_assessment else "Schoolwork",
+                "class_label": class_label,
             }
         )
     return assignments
@@ -146,6 +158,7 @@ def upsert_assignment(assignment):
     properties = {
         "Task name": {"title": [{"text": {"content": assignment["title"]}}]},
         "Category": {"select": {"name": assignment["category"]}},
+        "Class": {"select": {"name": assignment["class_label"]}},
         "Due date": {
             "date": {
                 "start": assignment["due_date"],
@@ -176,7 +189,9 @@ def upsert_assignment(assignment):
 
 def main():
     gt_assignments = fetch_assignments(GT_ICS_URL)
-    fulton_assignments = fetch_assignments(FULTON_ICS_URL, course_filter=FULTON_COURSE_FILTER)
+    fulton_assignments = fetch_assignments(
+        FULTON_ICS_URL, course_filter=FULTON_COURSE_FILTER, class_label_override="AP Lit/Comp A"
+    )
     all_assignments = gt_assignments + fulton_assignments
 
     print(f"Found {len(gt_assignments)} GT assignment(s), {len(fulton_assignments)} Fulton FV assignment(s).")
