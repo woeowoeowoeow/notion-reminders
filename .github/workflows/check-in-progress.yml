@@ -1,4 +1,4 @@
-name: Sync Canvas Assignments to Notion
+name: Check In Progress Tasks
 
 on:
   schedule:
