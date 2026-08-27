@@ -44,7 +44,7 @@ def query_notion(db_id, query_filter):
     }
 
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
-    payload = {"filter": query_filter}
+    payload = {"filter": query_filter} if query_filter else {}
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -57,7 +57,7 @@ def query_notion(db_id, query_filter):
         return []
 
 def get_exams_and_tests():
-    """Get exams/tests due in next 14 days."""
+    """Get exams/tests where Category = Assessment and Status != Done, due in next 14 days."""
     two_weeks_from_now = (datetime.now() + timedelta(days=14)).date().isoformat()
     today = datetime.now().date().isoformat()
 
@@ -84,7 +84,7 @@ def get_exams_and_tests():
     return items
 
 def get_this_week():
-    """Get assignments due in next 7 days."""
+    """Get assignments (any category) where Status != Done, due in next 7 days."""
     one_week_from_now = (datetime.now() + timedelta(days=7)).date().isoformat()
     today = datetime.now().date().isoformat()
 
