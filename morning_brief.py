@@ -48,7 +48,9 @@ def query_notion(db_id, query_filter):
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
+        if response.status_code != 200:
+            print(f"Notion API error ({response.status_code}): {response.text}")
+            return []
         return response.json().get("results", [])
     except Exception as e:
         print(f"Error querying Notion: {e}")
@@ -75,7 +77,7 @@ def get_exams_and_tests():
             title = result["properties"]["Name"]["title"][0]["text"]["content"]
             due_date = result["properties"]["Due Date"]["date"]["start"]
             items.append((title, due_date))
-        except (KeyError, IndexError):
+        except (KeyError, IndexError, TypeError):
             continue
 
     items.sort(key=lambda x: x[1])
@@ -101,7 +103,7 @@ def get_this_week():
             title = result["properties"]["Name"]["title"][0]["text"]["content"]
             due_date = result["properties"]["Due Date"]["date"]["start"]
             items.append((title, due_date))
-        except (KeyError, IndexError):
+        except (KeyError, IndexError, TypeError):
             continue
 
     items.sort(key=lambda x: x[1])
@@ -181,8 +183,7 @@ def format_brief(exams, assignments, announcements):
     """
 
     # Plain text version
-    text_content = f"""
-Good Morning
+    text_content = f"""Good Morning
 
 EXAMS & TESTS (Next 2 Weeks)
 {exams_text.replace('<br>', chr(10)).replace('<strong>', '').replace('</strong>', '')}
@@ -191,8 +192,7 @@ THIS WEEK
 {assignments_text.replace('<br>', chr(10)).replace('<strong>', '').replace('</strong>', '')}
 
 ANNOUNCEMENTS
-{announcements_text.replace('<br>', chr(10)).replace('<strong>', '').replace('</strong>', '')}
-"""
+{announcements_text.replace('<br>', chr(10)).replace('<strong>', '').replace('</strong>', '')}"""
 
     return html_content, text_content.strip()
 
@@ -220,6 +220,9 @@ def send_email(subject, html_content, text_content):
 
 def create_notion_entry(brief_text):
     """Create entry in Daily Briefs database."""
+    if not NOTION_BRIEFS_DB_ID:
+        return False
+        
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
