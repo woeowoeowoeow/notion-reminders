@@ -56,6 +56,12 @@ for page in results:
     # NOTE: "Task name" must match your database's actual title property name exactly.
     title_prop = props.get("Task name", {}).get("title", [])
     name = title_prop[0]["plain_text"] if title_prop else "(untitled task)"
+
+    class_prop = props.get("Class", {}).get("select")
+    class_name = class_prop["name"] if class_prop else None
+    if class_name:
+        name = f"{class_name} -- {name}"
+
     task_names.append(name)
 
 message = "\n".join(f"- {name}" for name in task_names)
