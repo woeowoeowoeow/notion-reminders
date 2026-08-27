@@ -26,7 +26,7 @@ jobs:
     - name: Run morning brief
       env:
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-        NOTION_TODO_DB_ID: ${{ secrets.NOTION_TODO_DB_ID }}
+        NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
         EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
       run: |

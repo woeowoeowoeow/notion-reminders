@@ -18,13 +18,19 @@ import pytz
 
 # Configuration
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-NOTION_TODO_DB_ID = os.getenv("NOTION_TODO_DB_ID")
+NOTION_DATA_SOURCE_ID = os.getenv("NOTION_DATA_SOURCE_ID")
 NOTION_BRIEFS_DB_ID = os.getenv("NOTION_BRIEFS_DB_ID")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_TO = "zoufvckyourself@gmail.com"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
+
+NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Notion-Version": "2025-09-03",
+    "Content-Type": "application/json",
+}
 
 # Course feeds
 FEEDS = {
@@ -35,26 +41,37 @@ FEEDS = {
     "Introduction to the Universe (KSU)": "https://kennesaw.view.usg.edu/d2l/le/news/rss/4034981/course?token=a96u2y2mlcsv2m6uf0a25&ou=4034981",
 }
 
-def query_notion(db_id, query_filter):
-    """Query Notion database with filter."""
-    headers = {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
 
-    url = f"https://api.notion.com/v1/databases/{db_id}/query"
+def query_notion(query_filter):
+    """Query the Notion Todo data source with a filter.
+
+    Raises on any non-200 response or request failure instead of
+    swallowing the error, so a broken query fails the workflow run
+    (and shows up in the logs / step failure) rather than silently
+    producing an empty "nothing to report" brief.
+    """
+    url = f"https://api.notion.com/v1/data_sources/{NOTION_DATA_SOURCE_ID}/query"
     payload = {"filter": query_filter} if query_filter else {}
 
+    response = requests.post(url, json=payload, headers=NOTION_HEADERS, timeout=10)
+    if response.status_code != 200:
+        print(f"Notion API error ({response.status_code}): {response.text}")
+        response.raise_for_status()
+    return response.json().get("results", [])
+
+
+def _extract_task(result):
+    """Pull (title, due_date) out of a Notion page result. Returns None if incomplete."""
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        if response.status_code != 200:
-            print(f"Notion API error ({response.status_code}): {response.text}")
-            return []
-        return response.json().get("results", [])
-    except Exception as e:
-        print(f"Error querying Notion: {e}")
-        return []
+        title_prop = result["properties"]["Task name"]["title"]
+        title = title_prop[0]["plain_text"] if title_prop else "(untitled task)"
+        due = result["properties"]["Due date"]["date"]
+        if not due or not due.get("start"):
+            return None
+        return (title, due["start"])
+    except (KeyError, IndexError, TypeError):
+        return None
+
 
 def get_exams_and_tests():
     """Get exams/tests where Category = Assessment and Status != Done, due in next 14 days."""
@@ -64,24 +81,17 @@ def get_exams_and_tests():
     filter_obj = {
         "and": [
             {"property": "Category", "select": {"equals": "Assessment"}},
-            {"property": "Status", "select": {"does_not_equal": "Done"}},
-            {"property": "Due Date", "date": {"on_or_after": today}},
-            {"property": "Due Date", "date": {"on_or_before": two_weeks_from_now}},
+            {"property": "Status", "status": {"does_not_equal": "Done"}},
+            {"property": "Due date", "date": {"on_or_after": today}},
+            {"property": "Due date", "date": {"on_or_before": two_weeks_from_now}},
         ]
     }
 
-    results = query_notion(NOTION_TODO_DB_ID, filter_obj)
-    items = []
-    for result in results:
-        try:
-            title = result["properties"]["Name"]["title"][0]["text"]["content"]
-            due_date = result["properties"]["Due Date"]["date"]["start"]
-            items.append((title, due_date))
-        except (KeyError, IndexError, TypeError):
-            continue
-
+    results = query_notion(filter_obj)
+    items = [t for t in (_extract_task(r) for r in results) if t]
     items.sort(key=lambda x: x[1])
     return items
+
 
 def get_this_week():
     """Get assignments (any category) where Status != Done, due in next 7 days."""
@@ -90,24 +100,17 @@ def get_this_week():
 
     filter_obj = {
         "and": [
-            {"property": "Status", "select": {"does_not_equal": "Done"}},
-            {"property": "Due Date", "date": {"on_or_after": today}},
-            {"property": "Due Date", "date": {"on_or_before": one_week_from_now}},
+            {"property": "Status", "status": {"does_not_equal": "Done"}},
+            {"property": "Due date", "date": {"on_or_after": today}},
+            {"property": "Due date", "date": {"on_or_before": one_week_from_now}},
         ]
     }
 
-    results = query_notion(NOTION_TODO_DB_ID, filter_obj)
-    items = []
-    for result in results:
-        try:
-            title = result["properties"]["Name"]["title"][0]["text"]["content"]
-            due_date = result["properties"]["Due Date"]["date"]["start"]
-            items.append((title, due_date))
-        except (KeyError, IndexError, TypeError):
-            continue
-
+    results = query_notion(filter_obj)
+    items = [t for t in (_extract_task(r) for r in results) if t]
     items.sort(key=lambda x: x[1])
     return items
+
 
 def get_new_announcements():
     """Get announcements from feeds posted in last 24 hours."""
@@ -138,6 +141,7 @@ def get_new_announcements():
             continue
 
     return announcements
+
 
 def format_brief(exams, assignments, announcements):
     """Format the brief as HTML email content."""
@@ -196,38 +200,29 @@ ANNOUNCEMENTS
 
     return html_content, text_content.strip()
 
+
 def send_email(subject, html_content, text_content):
-    """Send formatted email."""
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM
-        msg["To"] = EMAIL_TO
+    """Send formatted email. Raises on failure instead of swallowing the error."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = EMAIL_TO
 
-        msg.attach(MIMEText(text_content, "plain"))
-        msg.attach(MIMEText(html_content, "html"))
+    msg.attach(MIMEText(text_content, "plain"))
+    msg.attach(MIMEText(html_content, "html"))
 
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(EMAIL_FROM, EMAIL_PASSWORD)
-            server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(EMAIL_FROM, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
 
-        print(f"✅ Email sent to {EMAIL_TO}")
-        return True
-    except Exception as e:
-        print(f"❌ Error sending email: {e}")
-        return False
+    print(f"✅ Email sent to {EMAIL_TO}")
+
 
 def create_notion_entry(brief_text):
-    """Create entry in Daily Briefs database."""
+    """Create entry in Daily Briefs database (optional; skipped if not configured)."""
     if not NOTION_BRIEFS_DB_ID:
         return False
-        
-    headers = {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
 
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -259,7 +254,7 @@ def create_notion_entry(brief_text):
         response = requests.post(
             "https://api.notion.com/v1/pages",
             json=payload,
-            headers=headers,
+            headers=NOTION_HEADERS,
             timeout=10
         )
         response.raise_for_status()
@@ -269,20 +264,22 @@ def create_notion_entry(brief_text):
         print(f"⚠️ Could not create Notion entry: {e}")
         return False
 
+
 def main():
     """Generate and send morning brief."""
     print("📋 Generating morning brief...")
 
     # Check for required environment variables
-    if not all([NOTION_TOKEN, NOTION_TODO_DB_ID, EMAIL_FROM, EMAIL_PASSWORD]):
+    if not all([NOTION_TOKEN, NOTION_DATA_SOURCE_ID, EMAIL_FROM, EMAIL_PASSWORD]):
         print("❌ Missing environment variables. Please set:")
         print("   - NOTION_TOKEN")
-        print("   - NOTION_TODO_DB_ID")
+        print("   - NOTION_DATA_SOURCE_ID")
         print("   - EMAIL_FROM")
         print("   - EMAIL_PASSWORD")
         sys.exit(1)
 
-    # Gather data
+    # Gather data — let Notion errors propagate so the run fails loudly
+    # instead of emailing a false "nothing to report" brief.
     print("  Querying Notion...")
     exams = get_exams_and_tests()
     assignments = get_this_week()
@@ -303,6 +300,7 @@ def main():
         create_notion_entry(text_content)
 
     print("✅ Morning brief complete!")
+
 
 if __name__ == "__main__":
     main()
