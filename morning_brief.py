@@ -17,7 +17,7 @@ import feedparser
 import pytz
 
 # Configuration
-NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_TODO_DB_ID = os.getenv("NOTION_TODO_DB_ID")
 NOTION_BRIEFS_DB_ID = os.getenv("NOTION_BRIEFS_DB_ID")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
@@ -38,7 +38,7 @@ FEEDS = {
 def query_notion(db_id, query_filter):
     """Query Notion database with filter."""
     headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
@@ -221,7 +221,7 @@ def send_email(subject, html_content, text_content):
 def create_notion_entry(brief_text):
     """Create entry in Daily Briefs database."""
     headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
@@ -271,9 +271,9 @@ def main():
     print("📋 Generating morning brief...")
 
     # Check for required environment variables
-    if not all([NOTION_API_KEY, NOTION_TODO_DB_ID, EMAIL_FROM, EMAIL_PASSWORD]):
+    if not all([NOTION_TOKEN, NOTION_TODO_DB_ID, EMAIL_FROM, EMAIL_PASSWORD]):
         print("❌ Missing environment variables. Please set:")
-        print("   - NOTION_API_KEY")
+        print("   - NOTION_TOKEN")
         print("   - NOTION_TODO_DB_ID")
         print("   - EMAIL_FROM")
         print("   - EMAIL_PASSWORD")
