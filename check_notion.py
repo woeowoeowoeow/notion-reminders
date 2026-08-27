@@ -1,6 +1,7 @@
 import os
 import sys
 import datetime
+from collections import defaultdict
 import requests
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
@@ -50,7 +51,7 @@ if not results:
     print("No matching tasks — nothing to notify.")
     sys.exit(0)
 
-task_names = []
+groups = defaultdict(list)
 for page in results:
     props = page.get("properties", {})
     # NOTE: "Task name" must match your database's actual title property name exactly.
@@ -58,13 +59,20 @@ for page in results:
     name = title_prop[0]["plain_text"] if title_prop else "(untitled task)"
 
     class_prop = props.get("Class", {}).get("select")
-    class_name = class_prop["name"] if class_prop else None
-    if class_name:
-        name = f"{class_name} -- {name}"
+    group_name = class_prop["name"] if class_prop else "Personal"
 
-    task_names.append(name)
+    groups[group_name].append(name)
 
-message = "\n".join(f"- {name}" for name in task_names)
+# Personal always first, then every class alphabetically after it.
+ordered_group_names = sorted(groups.keys(), key=lambda g: (g != "Personal", g))
+
+sections = []
+for group_name in ordered_group_names:
+    bullet_list = "\n".join(f"* {name}" for name in groups[group_name])
+    sections.append(f"{group_name}:\n\n{bullet_list}")
+
+message = "\n\n".join(sections)
+task_count = len(results)
 
 ntfy_response = requests.post(
     f"https://ntfy.sh/{NTFY_TOPIC}",
@@ -72,4 +80,4 @@ ntfy_response = requests.post(
     headers={"Title": title, "Priority": "default", "Tags": "warning"},
 )
 ntfy_response.raise_for_status()
-print(f"Notified about {len(task_names)} task(s): {task_names}")
+print(f"Notified about {task_count} task(s) across {len(groups)} group(s).")
