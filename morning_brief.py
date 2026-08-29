@@ -265,9 +265,24 @@ def create_notion_entry(brief_text):
         return False
 
 
+def is_six_am_eastern():
+    """True if it's currently the 6 AM hour in US/Eastern (handles EDT/EST automatically)."""
+    eastern_now = datetime.now(pytz.timezone("America/New_York"))
+    return eastern_now.hour == 6
+
+
 def main():
     """Generate and send morning brief."""
     print("📋 Generating morning brief...")
+
+    # The workflow is scheduled twice a day (10:00 and 11:00 UTC) to cover
+    # both EDT and EST, since GitHub Actions cron doesn't shift for daylight
+    # saving. Only one of those two firings actually corresponds to 6 AM in
+    # US/Eastern on any given day — skip the other one here.
+    if not is_six_am_eastern():
+        eastern_now = datetime.now(pytz.timezone("America/New_York"))
+        print(f"⏭️  Skipping — it's {eastern_now.strftime('%I:%M %p %Z')} in US/Eastern, not the 6 AM run.")
+        return
 
     # Check for required environment variables
     if not all([NOTION_TOKEN, NOTION_DATA_SOURCE_ID, EMAIL_FROM, EMAIL_PASSWORD]):

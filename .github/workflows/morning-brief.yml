@@ -2,8 +2,12 @@ name: Morning Brief
 
 on:
   schedule:
-    # Run daily at 6 AM EDT (10 AM UTC)
-    - cron: '0 10 * * *'
+    # 6 AM US/Eastern year-round. GitHub Actions cron is UTC-only and does
+    # not shift for daylight saving, so we fire at both UTC offsets that
+    # 6 AM Eastern can map to; morning_brief.py checks the real Eastern
+    # local time and only sends on the one that actually is 6 AM.
+    - cron: "0 10 * * *"  # 6 AM EDT (UTC-4) -- roughly mid-Mar to early Nov
+    - cron: "0 11 * * *"  # 6 AM EST (UTC-5) -- roughly early Nov to mid-Mar
   workflow_dispatch:
 
 jobs:
@@ -17,7 +21,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: "3.11"
 
     - name: Install dependencies
       run: |
