@@ -1,6 +1,8 @@
 import os
 import re
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATA_SOURCE_ID = os.environ["NOTION_DATA_SOURCE_ID"]
@@ -9,6 +11,12 @@ D2L_ICS_URL = os.environ["D2L_KSU_ICS_URL"].strip()
 # Titles containing any of these (case-insensitive) are treated as assessments
 # rather than regular assignments/classwork. Same rule as the Canvas sync.
 ASSESSMENT_KEYWORDS = ["exam", "test", "quiz", "assessment", "dba"]
+
+# D2L/Brightspace emits DTSTART as a floating/TZID-qualified local time (no
+# trailing Z) or, less commonly, as literal UTC (trailing Z). When no TZID
+# is present on a local (non-Z) timestamp, assume US/Eastern -- that's the
+# timezone KSU's Brightspace instance actually runs on.
+DEFAULT_TZID = "America/New_York"
 
 NOTION_QUERY_URL = f"https://api.notion.com/v1/data_sources/{DATA_SOURCE_ID}/query"
 NOTION_PAGES_URL = "https://api.notion.com/v1/pages"
@@ -53,6 +61,11 @@ def parse_ics_events(raw_text):
             key, _, value = line.partition(":")
             key_name = key.split(";")[0]
             current[key_name] = value
+            if key_name == "DTSTART":
+                # Capture the TZID parameter, if present, e.g.
+                # "DTSTART;TZID=America/New_York" -> "America/New_York"
+                tzid_match = re.search(r"TZID=([^;:]+)", key)
+                current["DTSTART_TZID"] = tzid_match.group(1) if tzid_match else None
     return events
 
 
@@ -65,10 +78,28 @@ def ics_unescape(text):
     )
 
 
-def parse_due_date(dtstart):
+def parse_due_date(dtstart, tzid=None):
+    """Returns an ISO-8601 UTC datetime string for Notion.
+
+    dtstart is either:
+      - YYYYMMDDTHHMMSSZ  (literal UTC per RFC 5545 -- use as-is)
+      - YYYYMMDDTHHMMSS   (local time -- floating or TZID-qualified;
+                            interpret in `tzid`, or DEFAULT_TZID if none
+                            was given, and convert to real UTC)
+    """
     date_part = f"{dtstart[0:4]}-{dtstart[4:6]}-{dtstart[6:8]}"
     time_part = f"{dtstart[9:11]}:{dtstart[11:13]}:{dtstart[13:15]}"
-    return f"{date_part}T{time_part}Z"
+
+    if dtstart.endswith("Z"):
+        return f"{date_part}T{time_part}Z"
+
+    naive = datetime(
+        int(dtstart[0:4]), int(dtstart[4:6]), int(dtstart[6:8]),
+        int(dtstart[9:11]), int(dtstart[11:13]), int(dtstart[13:15]),
+    )
+    local = naive.replace(tzinfo=ZoneInfo(tzid or DEFAULT_TZID))
+    utc = local.astimezone(ZoneInfo("UTC"))
+    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def clean_course_name(location):
@@ -112,6 +143,7 @@ def resolve_assignments(events):
                 "course": course,
                 "kind": kind,
                 "dtstart": event["DTSTART"],
+                "dtstart_tzid": event.get("DTSTART_TZID"),
             }
         )
 
@@ -143,7 +175,7 @@ def find_notion_page_by_d2l_id(d2l_id):
 def upsert_assignment(assignment):
     title = assignment["title"]
     is_assessment = any(kw in assignment["title"].lower() for kw in ASSESSMENT_KEYWORDS)
-    due_date = parse_due_date(assignment["dtstart"])
+    due_date = parse_due_date(assignment["dtstart"], tzid=assignment.get("dtstart_tzid"))
 
     properties = {
         "Task name": {"title": [{"text": {"content": title}}]},
@@ -174,7 +206,6 @@ def upsert_assignment(assignment):
 
 
 def main():
-    response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
     response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
     print(f"Fetched feed: status {response.status_code}, {len(response.text)} chars, content-type {response.headers.get('content-type')}")
     if not response.text.strip().startswith("BEGIN:VCALENDAR"):

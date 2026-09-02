@@ -1,6 +1,8 @@
 import os
 import re
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATA_SOURCE_ID = os.environ["NOTION_DATA_SOURCE_ID"]
@@ -15,6 +17,12 @@ FULTON_COURSE_FILTER = "course_273100000000002740"
 # Titles containing any of these (case-insensitive) are treated as assessments
 # rather than regular assignments/classwork.
 ASSESSMENT_KEYWORDS = ["exam", "test", "quiz", "assessment", "dba"]
+
+# Canvas emits DTSTART either as a floating/TZID-qualified local time (no
+# trailing Z) or, less commonly, as literal UTC (trailing Z). When no TZID
+# is present on a local (non-Z) timestamp, assume US/Eastern -- that's the
+# timezone all of these courses (GT, Fulton) actually run on.
+DEFAULT_TZID = "America/New_York"
 
 NOTION_QUERY_URL = f"https://api.notion.com/v1/data_sources/{DATA_SOURCE_ID}/query"
 NOTION_PAGES_URL = "https://api.notion.com/v1/pages"
@@ -56,10 +64,14 @@ def parse_ics_events(raw_text):
             current = None
         elif current is not None and ":" in line:
             key, _, value = line.partition(":")
-            key_name = key.split(";")[0]  # drop parameters like ;VALUE=DATE
+            key_name = key.split(";")[0]  # e.g. "DTSTART" out of "DTSTART;TZID=..."
             current[key_name] = value
             if key_name == "DTSTART":
                 current["DTSTART_ALL_DAY"] = "VALUE=DATE" in key
+                # Capture the TZID parameter, if present, e.g.
+                # "DTSTART;TZID=America/New_York" -> "America/New_York"
+                tzid_match = re.search(r"TZID=([^;:]+)", key)
+                current["DTSTART_TZID"] = tzid_match.group(1) if tzid_match else None
     return events
 
 
@@ -72,15 +84,34 @@ def ics_unescape(text):
     )
 
 
-def parse_due_date(dtstart, is_all_day):
-    # Returns (date_string, is_datetime) in the format Notion expects.
+def parse_due_date(dtstart, is_all_day, tzid=None):
+    """Returns (date_string, is_datetime) in the format Notion expects.
+
+    dtstart is either:
+      - YYYYMMDD                (all-day, no time component)
+      - YYYYMMDDTHHMMSSZ        (literal UTC per RFC 5545 -- use as-is)
+      - YYYYMMDDTHHMMSS         (local time -- floating or TZID-qualified;
+                                  interpret in `tzid`, or DEFAULT_TZID if
+                                  none was given, and convert to real UTC)
+    """
     if is_all_day:
-        # Format: YYYYMMDD
         return f"{dtstart[0:4]}-{dtstart[4:6]}-{dtstart[6:8]}", False
-    # Format: YYYYMMDDTHHMMSSZ
+
     date_part = f"{dtstart[0:4]}-{dtstart[4:6]}-{dtstart[6:8]}"
     time_part = f"{dtstart[9:11]}:{dtstart[11:13]}:{dtstart[13:15]}"
-    return f"{date_part}T{time_part}Z", True
+
+    if dtstart.endswith("Z"):
+        # Already genuine UTC -- no conversion needed.
+        return f"{date_part}T{time_part}Z", True
+
+    # Local time: interpret in its stated (or default) zone, then convert.
+    naive = datetime(
+        int(dtstart[0:4]), int(dtstart[4:6]), int(dtstart[6:8]),
+        int(dtstart[9:11]), int(dtstart[11:13]), int(dtstart[13:15]),
+    )
+    local = naive.replace(tzinfo=ZoneInfo(tzid or DEFAULT_TZID))
+    utc = local.astimezone(ZoneInfo("UTC"))
+    return utc.strftime("%Y-%m-%dT%H:%M:%SZ"), True
 
 
 # --- Fetch and filter events ---------------------------------------------
@@ -127,7 +158,9 @@ def fetch_assignments(url, course_filter=None, class_label_override=None):
             due_date, is_datetime = parse_due_date(dtstart, is_all_day=True)
         else:
             due_date, is_datetime = parse_due_date(
-                dtstart, is_all_day=event.get("DTSTART_ALL_DAY", False)
+                dtstart,
+                is_all_day=event.get("DTSTART_ALL_DAY", False),
+                tzid=event.get("DTSTART_TZID"),
             )
 
         assignments.append(
