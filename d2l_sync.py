@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+from notion_http import notion_request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -166,7 +167,7 @@ def resolve_assignments(events):
 
 def find_notion_page_by_d2l_id(d2l_id):
     filter_body = {"filter": {"property": "D2L Event ID", "rich_text": {"equals": d2l_id}}}
-    response = requests.post(NOTION_QUERY_URL, headers=NOTION_HEADERS, json=filter_body)
+    response = notion_request('POST', NOTION_QUERY_URL, headers=NOTION_HEADERS, json=filter_body)
     response.raise_for_status()
     results = response.json().get("results", [])
     return results[0] if results else None
@@ -188,7 +189,7 @@ def upsert_assignment(assignment):
     existing_page = find_notion_page_by_d2l_id(assignment["uid"])
 
     if existing_page:
-        response = requests.patch(
+        response = notion_request('PATCH',
             f"{NOTION_PAGES_URL}/{existing_page['id']}",
             headers=NOTION_HEADERS,
             json={"properties": properties},
@@ -196,7 +197,7 @@ def upsert_assignment(assignment):
         response.raise_for_status()
         return "updated", title, is_assessment
     else:
-        response = requests.post(
+        response = notion_request('POST',
             NOTION_PAGES_URL,
             headers=NOTION_HEADERS,
             json={"parent": {"data_source_id": DATA_SOURCE_ID}, "properties": properties},
@@ -206,7 +207,7 @@ def upsert_assignment(assignment):
 
 
 def main():
-    response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS)
+    response = requests.get(D2L_ICS_URL, headers=REQUEST_HEADERS, timeout=30)
     print(f"Fetched feed: status {response.status_code}, {len(response.text)} chars, content-type {response.headers.get('content-type')}")
     if not response.text.strip().startswith("BEGIN:VCALENDAR"):
         print("Response doesn't look like ICS content. Full body below:")

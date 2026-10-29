@@ -9,12 +9,15 @@ import os
 import sys
 import json
 import smtplib
+import calendar
 import requests
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import feedparser
 import pytz
+from brief_state import FileDeliveryState, GitHubDeliveryState
+from notion_http import notion_request
 
 # Configuration
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -53,7 +56,7 @@ def query_notion(query_filter):
     url = f"https://api.notion.com/v1/data_sources/{NOTION_DATA_SOURCE_ID}/query"
     payload = {"filter": query_filter} if query_filter else {}
 
-    response = requests.post(url, json=payload, headers=NOTION_HEADERS, timeout=10)
+    response = notion_request('POST', url, json=payload, headers=NOTION_HEADERS)
     if response.status_code != 200:
         print(f"Notion API error ({response.status_code}): {response.text}")
         response.raise_for_status()
@@ -126,7 +129,7 @@ def get_new_announcements():
                 pub_date = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     pub_date = datetime.fromtimestamp(
-                        sum(entry.published_parsed[:6] + (0,) * 3) if entry.published_parsed else 0,
+                        calendar.timegm(entry.published_parsed),
                         tz=pytz.UTC
                     )
 
@@ -211,10 +214,12 @@ def send_email(subject, html_content, text_content):
     msg.attach(MIMEText(text_content, "plain"))
     msg.attach(MIMEText(html_content, "html"))
 
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
         server.starttls()
         server.login(EMAIL_FROM, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+        refused = server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+        if refused:
+            raise smtplib.SMTPRecipientsRefused(refused)
 
     print(f"✅ Email sent to {EMAIL_TO}")
 
@@ -251,7 +256,7 @@ def create_notion_entry(brief_text):
     }
 
     try:
-        response = requests.post(
+        response = notion_request('POST',
             "https://api.notion.com/v1/pages",
             json=payload,
             headers=NOTION_HEADERS,
@@ -265,23 +270,31 @@ def create_notion_entry(brief_text):
         return False
 
 
-def is_six_am_eastern():
-    """True if it's currently the 6 AM hour in US/Eastern (handles EDT/EST automatically)."""
-    eastern_now = datetime.now(pytz.timezone("America/New_York"))
-    return eastern_now.hour == 6
+def brief_is_due(now, last_sent):
+    """Deliver today's brief after 6 AM Eastern, including delayed runs."""
+    eastern_now = now.astimezone(pytz.timezone('America/New_York'))
+    today = eastern_now.date().isoformat()
+    if last_sent and last_sent > today:
+        raise ValueError('Delivery receipt is in the future; check the clock/state')
+    return eastern_now.hour >= 6 and last_sent != today
 
 
-def main():
+def main(now=None, state=None):
     """Generate and send morning brief."""
     print("📋 Generating morning brief...")
 
-    # The workflow is scheduled twice a day (10:00 and 11:00 UTC) to cover
-    # both EDT and EST, since GitHub Actions cron doesn't shift for daylight
-    # saving. Only one of those two firings actually corresponds to 6 AM in
-    # US/Eastern on any given day — skip the other one here.
-    if not is_six_am_eastern():
-        eastern_now = datetime.now(pytz.timezone("America/New_York"))
-        print(f"⏭️  Skipping — it's {eastern_now.strftime('%I:%M %p %Z')} in US/Eastern, not the 6 AM run.")
+    now = now or datetime.now(pytz.UTC)
+    eastern_now = now.astimezone(pytz.timezone('America/New_York'))
+    if eastern_now.hour < 6:
+        print('Skipping: before 6 AM Eastern.')
+        return
+    if state is None:
+        if os.getenv('GITHUB_ACTIONS') == 'true':
+            state = GitHubDeliveryState(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_TOKEN'])
+        else:
+            state = FileDeliveryState(os.environ['BRIEF_STATE_FILE'])
+    if not brief_is_due(now, state.load()):
+        print('Skipping: today\'s morning brief was already delivered.')
         return
 
     # Check for required environment variables
@@ -306,9 +319,11 @@ def main():
     html_content, text_content = format_brief(exams, assignments, announcements)
 
     # Send email
-    today = datetime.now().strftime("%B %d, %Y")
+    today = eastern_now.strftime("%B %d, %Y")
     subject = f"Good Morning — {today}"
     send_email(subject, html_content, text_content)
+    # Persist immediately after SMTP acceptance, before optional Notion writes.
+    state.mark_sent(eastern_now.date().isoformat())
 
     # Save to Notion (optional)
     if NOTION_BRIEFS_DB_ID:

@@ -3,6 +3,7 @@ import sys
 import datetime
 from collections import defaultdict
 import requests
+from notion_http import notion_request
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATA_SOURCE_ID = os.environ["NOTION_DATA_SOURCE_ID"]
@@ -39,7 +40,7 @@ elif MODE == "not_done":
 else:
     raise ValueError(f"Unknown mode: {MODE}")
 
-response = requests.post(NOTION_API_URL, headers=HEADERS, json=filter_body)
+response = notion_request('POST', NOTION_API_URL, headers=HEADERS, json=filter_body)
 
 if response.status_code != 200:
     print(f"Notion API error {response.status_code}: {response.text}")
@@ -76,6 +77,7 @@ task_count = len(results)
 
 ntfy_response = requests.post(
     f"https://ntfy.sh/{NTFY_TOPIC}",
+    timeout=30,
     data=message.encode("utf-8"),
     headers={"Title": title, "Priority": "default", "Tags": "warning"},
 )

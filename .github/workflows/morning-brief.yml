@@ -2,33 +2,47 @@ name: Morning Brief
 
 on:
   schedule:
-    # 6 AM US/Eastern year-round. GitHub Actions cron is UTC-only and does
-    # not shift for daylight saving, so we fire at both UTC offsets that
-    # 6 AM Eastern can map to; morning_brief.py checks the real Eastern
-    # local time and only sends on the one that actually is 6 AM.
-    - cron: "0 10 * * *"  # 6 AM EDT (UTC-4) -- roughly mid-Mar to early Nov
-    - cron: "0 11 * * *"  # 6 AM EST (UTC-5) -- roughly early Nov to mid-Mar
+    # Both UTC offsets cover Eastern DST. The script accepts late starts
+    # after 6 AM and uses a persistent receipt to skip the second delivery.
+    - cron: "17 10 * * *"
+    - cron: "17 11 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+# All jobs share one Notion connection; queue rather than cancel waiting runs.
+concurrency:
+  group: notion-automation
+  queue: max
+  cancel-in-progress: false
+
+env:
+  TZ: America/New_York
 
 jobs:
   send-brief:
+    permissions:
+      contents: write  # Delivery receipt on automation-state only.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: "3.11"
 
     - name: Install dependencies
       run: |
-        pip install requests feedparser pytz
+        pip install -r requirements.txt
 
     - name: Run morning brief
       env:
+        GITHUB_TOKEN: ${{ github.token }}
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
         EMAIL_FROM: ${{ secrets.EMAIL_FROM }}

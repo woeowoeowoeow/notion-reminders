@@ -5,18 +5,30 @@ on:
     - cron: '15 * * * *'   # hourly, at :15, UTC
   workflow_dispatch:        # lets you trigger it manually to test
 
+permissions:
+  contents: read
+
+# All jobs share one Notion connection; queue rather than cancel waiting runs.
+concurrency:
+  group: notion-automation
+  queue: max
+  cancel-in-progress: false
+
+env:
+  TZ: America/New_York
+
 jobs:
-  sync:
+  check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - run: python canvas_sync.py
+      - run: python check_notion.py in_progress
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
-          CANVAS_GT_ICS_URL: ${{ secrets.CANVAS_GT_ICS_URL }}
-          CANVAS_FULTON_ICS_URL: ${{ secrets.CANVAS_FULTON_ICS_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

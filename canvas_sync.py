@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+from notion_http import notion_request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -128,7 +129,7 @@ def extract_class_label(raw_summary):
 
 
 def fetch_assignments(url, course_filter=None, class_label_override=None):
-    response = requests.get(url)
+    response = requests.get(url, timeout=30)
     response.raise_for_status()
     events = parse_ics_events(response.text)
 
@@ -181,7 +182,7 @@ def fetch_assignments(url, course_filter=None, class_label_override=None):
 
 def find_notion_page_by_canvas_id(canvas_id):
     filter_body = {"filter": {"property": "Canvas Event ID", "rich_text": {"equals": canvas_id}}}
-    response = requests.post(NOTION_QUERY_URL, headers=NOTION_HEADERS, json=filter_body)
+    response = notion_request('POST', NOTION_QUERY_URL, headers=NOTION_HEADERS, json=filter_body)
     response.raise_for_status()
     results = response.json().get("results", [])
     return results[0] if results else None
@@ -203,7 +204,7 @@ def upsert_assignment(assignment):
     existing_page = find_notion_page_by_canvas_id(assignment["uid"])
 
     if existing_page:
-        response = requests.patch(
+        response = notion_request('PATCH',
             f"{NOTION_PAGES_URL}/{existing_page['id']}",
             headers=NOTION_HEADERS,
             json={"properties": properties},
@@ -211,7 +212,7 @@ def upsert_assignment(assignment):
         response.raise_for_status()
         return "updated"
     else:
-        response = requests.post(
+        response = notion_request('POST',
             NOTION_PAGES_URL,
             headers=NOTION_HEADERS,
             json={"parent": {"data_source_id": DATA_SOURCE_ID}, "properties": properties},
